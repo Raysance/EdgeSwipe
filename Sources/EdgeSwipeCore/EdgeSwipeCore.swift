@@ -47,10 +47,10 @@ public struct EdgeGestureConfig: Codable, Sendable {
     public var cooldown: TimeInterval
 
     public init(
-        edgeBand: Double = 0.08,
-        minTravel: Double = 0.22,
-        maxCrossAxisTravel: Double = 0.18,
-        cooldown: TimeInterval = 0.7
+        edgeBand: Double = 0.05,
+        minTravel: Double = 0.17,
+        maxCrossAxisTravel: Double = 0.20,
+        cooldown: TimeInterval = 0.28
     ) {
         self.edgeBand = edgeBand
         self.minTravel = minTravel

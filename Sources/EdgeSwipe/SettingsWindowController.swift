@@ -83,10 +83,10 @@ final class SettingsWindowController: NSWindowController {
         crossAxisSlider = slider(value: settings.config.maxCrossAxisTravel, min: 0.04, max: 0.35)
         cooldownSlider = slider(value: settings.config.cooldown, min: 0.1, max: 2.0)
 
-        stack.addArrangedSubview(labeledControl("Edge band", detail: "Start zone near an edge", control: edgeBandSlider))
-        stack.addArrangedSubview(labeledControl("Inward travel", detail: "Required movement toward center", control: minTravelSlider))
-        stack.addArrangedSubview(labeledControl("Drift limit", detail: "Maximum movement across the wrong axis", control: crossAxisSlider))
-        stack.addArrangedSubview(labeledControl("Cooldown", detail: "Minimum seconds between triggers", control: cooldownSlider))
+        stack.addArrangedSubview(labeledControl("Edge band", detail: "Start zone near an edge", minLabel: "Tighter edge", maxLabel: "Wider edge", control: edgeBandSlider))
+        stack.addArrangedSubview(labeledControl("Inward travel", detail: "Required movement toward center", minLabel: "Short swipe", maxLabel: "Long swipe", control: minTravelSlider))
+        stack.addArrangedSubview(labeledControl("Drift limit", detail: "Maximum movement across the wrong axis", minLabel: "Strict line", maxLabel: "Loose line", control: crossAxisSlider))
+        stack.addArrangedSubview(labeledControl("Cooldown", detail: "Minimum seconds between triggers", minLabel: "More repeat", maxLabel: "Less repeat", control: cooldownSlider))
 
         debugCheckbox = NSButton(checkboxWithTitle: "Log raw gesture touch counts to Console", target: self, action: #selector(updateSettingsFromControls))
         debugCheckbox.state = settings.debugLogging ? .on : .off
@@ -139,7 +139,7 @@ final class SettingsWindowController: NSWindowController {
         return outer
     }
 
-    private func labeledControl(_ title: String, detail: String, control: NSControl) -> NSView {
+    private func labeledControl(_ title: String, detail: String, minLabel: String, maxLabel: String, control: NSControl) -> NSView {
         let row = NSStackView()
         row.orientation = .horizontal
         row.alignment = .centerY
@@ -159,17 +159,41 @@ final class SettingsWindowController: NSWindowController {
         detailLabel.font = .systemFont(ofSize: 11)
         detailLabel.textColor = .secondaryLabelColor
 
+        let range = NSStackView()
+        range.orientation = .horizontal
+        range.alignment = .centerY
+        range.spacing = 8
+        range.translatesAutoresizingMaskIntoConstraints = false
+
+        let minText = rangeLabel(minLabel, alignment: .right)
+        let maxText = rangeLabel(maxLabel, alignment: .left)
+
         labels.addArrangedSubview(titleLabel)
         labels.addArrangedSubview(detailLabel)
+        range.addArrangedSubview(minText)
+        range.addArrangedSubview(control)
+        range.addArrangedSubview(maxText)
         row.addArrangedSubview(labels)
-        row.addArrangedSubview(control)
+        row.addArrangedSubview(range)
 
         NSLayoutConstraint.activate([
             labels.widthAnchor.constraint(equalToConstant: 190),
-            control.widthAnchor.constraint(equalToConstant: 430)
+            minText.widthAnchor.constraint(equalToConstant: 78),
+            control.widthAnchor.constraint(equalToConstant: 285),
+            maxText.widthAnchor.constraint(equalToConstant: 78),
+            range.widthAnchor.constraint(equalToConstant: 465)
         ])
 
         return row
+    }
+
+    private func rangeLabel(_ text: String, alignment: NSTextAlignment) -> NSTextField {
+        let label = NSTextField(labelWithString: text)
+        label.font = .systemFont(ofSize: 11)
+        label.textColor = .secondaryLabelColor
+        label.alignment = alignment
+        label.lineBreakMode = .byTruncatingTail
+        return label
     }
 
     private func slider(value: Double, min: Double, max: Double) -> NSSlider {
