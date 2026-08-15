@@ -1,4 +1,5 @@
 import AppKit
+import ApplicationServices
 import EdgeSwipeCore
 
 @MainActor
@@ -196,21 +197,22 @@ final class SettingsWindowController: NSWindowController {
 @MainActor
 final class EdgeActionRow: NSStackView {
     private let edge: Edge
-    private let popup: NSPopUpButton
+    private let popup: ActionPopUpButton
     private let payload: NSTextField
     private let runner: ActionRunner
+    private var selectedKind: GestureActionKind
     private weak var settingsTarget: SettingsWindowController?
 
     var setting: EdgeActionSetting {
-        let selected = GestureActionKind.allCases[popup.indexOfSelectedItem]
-        return EdgeActionSetting(kind: selected, payload: payload.stringValue)
+        EdgeActionSetting(kind: selectedKind, payload: payload.stringValue)
     }
 
     init(edge: Edge, setting: EdgeActionSetting, target: SettingsWindowController, runner: ActionRunner) {
         self.edge = edge
-        self.popup = NSPopUpButton()
+        self.popup = ActionPopUpButton()
         self.payload = NSTextField(string: setting.payload)
         self.runner = runner
+        self.selectedKind = setting.kind.isSelectable ? setting.kind : .disabled
         self.settingsTarget = target
         super.init(frame: .zero)
 
@@ -223,16 +225,16 @@ final class EdgeActionRow: NSStackView {
         label.font = .systemFont(ofSize: 13, weight: .medium)
         label.alignment = .right
 
-        popup.addItems(withTitles: GestureActionKind.allCases.map(\.displayName))
-        popup.selectItem(at: GestureActionKind.allCases.firstIndex(of: setting.kind) ?? 0)
-        popup.target = self
-        popup.action = #selector(changed)
+        popup.onOpen = { [weak self] in
+            self?.rebuildActionMenu()
+        }
+        rebuildActionMenu()
 
-        payload.placeholderString = placeholder(for: setting.kind)
-        payload.isEnabled = setting.kind.usesPayload
-        payload.textColor = setting.kind.usesPayload ? .labelColor : .secondaryLabelColor
+        payload.placeholderString = placeholder(for: selectedKind)
+        payload.isEnabled = selectedKind.usesPayload
+        payload.textColor = selectedKind.usesPayload ? .labelColor : .secondaryLabelColor
         payload.target = self
-        payload.action = #selector(changed)
+        payload.action = #selector(payloadChanged)
 
         let button = NSButton(title: "Test", target: self, action: #selector(testAction))
         button.bezelStyle = .rounded
@@ -244,8 +246,8 @@ final class EdgeActionRow: NSStackView {
 
         NSLayoutConstraint.activate([
             label.widthAnchor.constraint(equalToConstant: 72),
-            popup.widthAnchor.constraint(equalToConstant: 135),
-            payload.widthAnchor.constraint(equalToConstant: 360),
+            popup.widthAnchor.constraint(equalToConstant: 190),
+            payload.widthAnchor.constraint(equalToConstant: 305),
             button.widthAnchor.constraint(equalToConstant: 72)
         ])
     }
@@ -254,7 +256,37 @@ final class EdgeActionRow: NSStackView {
         nil
     }
 
-    @objc private func changed() {
+    @objc private func selectRegularAction(_ sender: NSMenuItem) {
+        guard let rawValue = sender.representedObject as? String,
+              let kind = GestureActionKind(rawValue: rawValue)
+        else {
+            return
+        }
+
+        selectedKind = kind
+        if !kind.usesPayload {
+            payload.stringValue = ""
+        }
+        rebuildActionMenu()
+        applySelection()
+    }
+
+    @objc private func selectSwitchApplication(_ sender: NSMenuItem) {
+        guard let app = sender.representedObject as? WindowedApplication else {
+            return
+        }
+
+        selectedKind = .switchApplication
+        payload.stringValue = app.identifier
+        rebuildActionMenu()
+        applySelection()
+    }
+
+    @objc private func payloadChanged() {
+        applySelection()
+    }
+
+    private func applySelection() {
         payload.placeholderString = placeholder(for: setting.kind)
         payload.isEnabled = setting.kind.usesPayload
         payload.textColor = setting.kind.usesPayload ? .labelColor : .secondaryLabelColor
@@ -270,15 +302,133 @@ final class EdgeActionRow: NSStackView {
         switch kind {
         case .disabled: return ""
         case .showHUD: return "No payload needed"
-        case .missionControl: return "Built-in system action"
-        case .appExpose: return "Uses Control + Down Arrow"
-        case .showDesktop: return "Uses F11"
-        case .launchpad: return "Uses F4"
-        case .notificationCenter: return "Uses Control Center/Notification Center"
-        case .lockScreen: return "Uses CGSession"
-        case .startScreenSaver: return "Opens ScreenSaverEngine"
-        case .runShell: return #"osascript -e 'display notification "Triggered"'"#
         case .open: return "https://apple.com or ~/Documents"
+        case .runShell: return #"osascript -e 'display notification "Triggered"'"#
+        case .controlCenter: return "Clicks Control Center menu bar item"
+        case .lockScreen: return "Uses login framework lock"
+        case .screenshot: return "Opens Screenshot"
+        case .switchApplication: return "Safari or com.apple.Safari"
+        case .missionControl, .appExpose, .showDesktop, .launchpad, .notificationCenter, .startScreenSaver:
+            return "Removed action"
         }
+    }
+
+    private func rebuildActionMenu() {
+        let menu = NSMenu()
+
+        for kind in GestureActionKind.allCases where kind != .switchApplication {
+            let item = NSMenuItem(title: kind.displayName, action: #selector(selectRegularAction(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = kind.rawValue
+            item.state = selectedKind == kind ? .on : .off
+            menu.addItem(item)
+        }
+
+        menu.addItem(.separator())
+
+        let switchItem = NSMenuItem(title: "Switch App", action: nil, keyEquivalent: "")
+        let switchMenu = NSMenu()
+        let apps = WindowedApplication.current()
+
+        if apps.isEmpty {
+            let emptyItem = NSMenuItem(title: "No windowed apps", action: nil, keyEquivalent: "")
+            emptyItem.isEnabled = false
+            switchMenu.addItem(emptyItem)
+        } else {
+            for app in apps {
+                let appItem = NSMenuItem(title: app.name, action: #selector(selectSwitchApplication(_:)), keyEquivalent: "")
+                appItem.target = self
+                appItem.representedObject = app
+                appItem.state = selectedKind == .switchApplication && payload.stringValue == app.identifier ? .on : .off
+                switchMenu.addItem(appItem)
+            }
+        }
+
+        switchItem.submenu = switchMenu
+        menu.addItem(switchItem)
+
+        popup.menu = menu
+        popup.title = selectedPopupTitle(from: apps)
+    }
+
+    private func selectedPopupTitle(from apps: [WindowedApplication]) -> String {
+        guard selectedKind == .switchApplication else {
+            return selectedKind.displayName
+        }
+
+        let selectedApp = apps.first { $0.identifier == payload.stringValue }
+        return "Switch App: \(selectedApp?.name ?? payload.stringValue)"
+    }
+}
+
+private final class ActionPopUpButton: NSPopUpButton {
+    var onOpen: (() -> Void)?
+
+    override func mouseDown(with event: NSEvent) {
+        onOpen?()
+        super.mouseDown(with: event)
+    }
+}
+
+private struct WindowedApplication: Sendable {
+    let name: String
+    let identifier: String
+    let processIdentifier: pid_t
+
+    @MainActor
+    static func current() -> [WindowedApplication] {
+        let windowPIDs = visibleWindowProcessIDs()
+        let apps = NSWorkspace.shared.runningApplications.compactMap { app -> WindowedApplication? in
+            guard app.activationPolicy == .regular,
+                  (windowPIDs.contains(app.processIdentifier) || hasAccessibilityWindow(processIdentifier: app.processIdentifier)),
+                  let name = app.localizedName,
+                  !name.isEmpty
+            else {
+                return nil
+            }
+
+            return WindowedApplication(
+                name: name,
+                identifier: app.bundleIdentifier ?? name,
+                processIdentifier: app.processIdentifier
+            )
+        }
+
+        return apps
+            .sorted { lhs, rhs in
+                lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
+            }
+    }
+
+    private static func visibleWindowProcessIDs() -> Set<pid_t> {
+        guard let windowInfo = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] else {
+            return []
+        }
+
+        return Set(windowInfo.compactMap { info in
+            guard let layer = info[kCGWindowLayer as String] as? Int,
+                  layer == 0,
+                  let pid = info[kCGWindowOwnerPID as String] as? pid_t
+            else {
+                return nil
+            }
+            return pid
+        })
+    }
+
+    private static func hasAccessibilityWindow(processIdentifier: pid_t) -> Bool {
+        guard AXIsProcessTrusted() else {
+            return false
+        }
+
+        let axApp = AXUIElementCreateApplication(processIdentifier)
+        var windowsValue: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(axApp, kAXWindowsAttribute as CFString, &windowsValue) == .success,
+              let windows = windowsValue as? [AXUIElement]
+        else {
+            return false
+        }
+
+        return !windows.isEmpty
     }
 }

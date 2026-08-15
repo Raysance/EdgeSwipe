@@ -4,39 +4,63 @@ import EdgeSwipeCore
 enum GestureActionKind: String, Codable, CaseIterable, Sendable {
     case disabled
     case showHUD
+    case open
+    case runShell
+    case controlCenter
+    case lockScreen
+    case screenshot
+    case switchApplication
+
     case missionControl
     case appExpose
     case showDesktop
     case launchpad
     case notificationCenter
-    case lockScreen
     case startScreenSaver
-    case runShell
-    case open
+
+    static var allCases: [GestureActionKind] {
+        [
+            .disabled,
+            .showHUD,
+            .open,
+            .runShell,
+            .controlCenter,
+            .lockScreen,
+            .screenshot,
+            .switchApplication
+        ]
+    }
 
     var displayName: String {
         switch self {
         case .disabled: return "Disabled"
         case .showHUD: return "Show HUD"
+        case .open: return "Open URL/File"
+        case .runShell: return "Run Shell"
+        case .controlCenter: return "Control Center"
+        case .lockScreen: return "Lock Screen"
+        case .screenshot: return "Screenshot"
+        case .switchApplication: return "Switch App"
         case .missionControl: return "Mission Control"
         case .appExpose: return "App Exposé"
         case .showDesktop: return "Show Desktop"
         case .launchpad: return "Launchpad"
         case .notificationCenter: return "Notification Center"
-        case .lockScreen: return "Lock Screen"
         case .startScreenSaver: return "Start Screen Saver"
-        case .runShell: return "Run Shell"
-        case .open: return "Open URL/File"
         }
     }
 
     var usesPayload: Bool {
         switch self {
-        case .runShell, .open:
+        case .runShell, .open, .switchApplication:
             return true
-        case .disabled, .showHUD, .missionControl, .appExpose, .showDesktop, .launchpad, .notificationCenter, .lockScreen, .startScreenSaver:
+        case .disabled, .showHUD, .controlCenter, .lockScreen, .screenshot, .missionControl, .appExpose, .showDesktop, .launchpad, .notificationCenter, .startScreenSaver:
             return false
         }
+    }
+
+    var isSelectable: Bool {
+        Self.allCases.contains(self)
     }
 }
 
@@ -64,7 +88,8 @@ struct AppSettings: Codable, Sendable {
     )
 
     func action(for edge: Edge) -> EdgeActionSetting {
-        actions[edge.rawValue] ?? .disabled
+        let setting = actions[edge.rawValue] ?? .disabled
+        return setting.kind.isSelectable ? setting : .disabled
     }
 }
 

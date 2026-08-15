@@ -25,17 +25,14 @@ swift run EdgeSwipe
 Each edge can run one of these built-in actions:
 
 - Show HUD
-- Mission Control
-- App Exposé
-- Show Desktop
-- Launchpad
-- Notification Center
+- Control Center
 - Lock Screen
-- Start Screen Saver
+- Screenshot
+- Switch App, with a submenu of currently windowed apps
 - Run Shell
 - Open URL/File
 
-Keyboard-simulated actions may require granting Accessibility permission to EdgeSwipe.
+Control Center and restoring minimized Switch App windows may require granting Accessibility permission to EdgeSwipe. Switch App can be chosen from the action menu's app submenu; it stores the selected app bundle identifier in the payload field.
 
 ## Build App Bundle
 
