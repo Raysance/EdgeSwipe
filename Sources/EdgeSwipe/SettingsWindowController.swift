@@ -377,19 +377,29 @@ private struct WindowedApplication: Sendable {
 
     @MainActor
     static func current() -> [WindowedApplication] {
-        let windowPIDs = visibleWindowProcessIDs()
+        let windowOwners = allWindowOwners()
+        var seenIdentifiers = Set<String>()
         let apps = NSWorkspace.shared.runningApplications.compactMap { app -> WindowedApplication? in
+            let name = app.localizedName ?? ""
             guard app.activationPolicy == .regular,
-                  (windowPIDs.contains(app.processIdentifier) || hasAccessibilityWindow(processIdentifier: app.processIdentifier)),
-                  let name = app.localizedName,
+                  (
+                    windowOwners.processIdentifiers.contains(app.processIdentifier) ||
+                    windowOwners.names.contains(name) ||
+                    hasAccessibilityWindow(processIdentifier: app.processIdentifier)
+                  ),
                   !name.isEmpty
             else {
                 return nil
             }
 
+            let identifier = app.bundleIdentifier ?? "\(name)-\(app.processIdentifier)"
+            guard seenIdentifiers.insert(identifier).inserted else {
+                return nil
+            }
+
             return WindowedApplication(
                 name: name,
-                identifier: app.bundleIdentifier ?? name,
+                identifier: identifier,
                 processIdentifier: app.processIdentifier
             )
         }
@@ -400,20 +410,36 @@ private struct WindowedApplication: Sendable {
             }
     }
 
-    private static func visibleWindowProcessIDs() -> Set<pid_t> {
-        guard let windowInfo = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] else {
-            return []
+    private struct WindowOwners {
+        let processIdentifiers: Set<pid_t>
+        let names: Set<String>
+    }
+
+    private static func allWindowOwners() -> WindowOwners {
+        guard let windowInfo = CGWindowListCopyWindowInfo([.optionAll, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] else {
+            return WindowOwners(processIdentifiers: [], names: [])
         }
 
-        return Set(windowInfo.compactMap { info in
+        var processIdentifiers = Set<pid_t>()
+        var names = Set<String>()
+
+        for info in windowInfo {
             guard let layer = info[kCGWindowLayer as String] as? Int,
-                  layer == 0,
-                  let pid = info[kCGWindowOwnerPID as String] as? pid_t
+                  layer == 0
             else {
-                return nil
+                continue
             }
-            return pid
-        })
+
+            if let pid = info[kCGWindowOwnerPID as String] as? pid_t {
+                processIdentifiers.insert(pid)
+            }
+
+            if let ownerName = info[kCGWindowOwnerName as String] as? String, !ownerName.isEmpty {
+                names.insert(ownerName)
+            }
+        }
+
+        return WindowOwners(processIdentifiers: processIdentifiers, names: names)
     }
 
     private static func hasAccessibilityWindow(processIdentifier: pid_t) -> Bool {

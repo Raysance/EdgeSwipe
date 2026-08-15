@@ -179,8 +179,7 @@ final class ActionRunner {
         """
 
         if !AXIsProcessTrusted() {
-            requestAccessibilityPermission()
-            showHUD(edge: edge, text: "Allow Accessibility")
+            noteMissingAccessibility(edge: edge)
             return
         }
 
@@ -233,7 +232,7 @@ final class ActionRunner {
         if AXIsProcessTrusted() {
             restoreMinimizedWindows(for: runningApp)
         } else {
-            requestAccessibilityPermission()
+            noteMissingAccessibility(edge: edge)
         }
 
         runningApp.unhide()
@@ -268,9 +267,9 @@ final class ActionRunner {
         return restored
     }
 
-    private func requestAccessibilityPermission() {
-        let options = ["AXTrustedCheckOptionPrompt": true] as CFDictionary
-        _ = AXIsProcessTrustedWithOptions(options)
+    private func noteMissingAccessibility(edge: Edge) {
+        _ = AXIsProcessTrustedWithOptions(["AXTrustedCheckOptionPrompt": false] as CFDictionary)
+        showHUD(edge: edge, text: "Accessibility Needed")
     }
 
     private func shellQuoted(_ text: String) -> String {
