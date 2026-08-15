@@ -12,6 +12,8 @@ final class SettingsWindowController: NSWindowController {
     private var crossAxisSlider: NSSlider!
     private var cooldownSlider: NSSlider!
     private var debugCheckbox: NSButton!
+    private var launchAtLoginCheckbox: NSButton!
+    private var launchAtLoginStatusLabel: NSTextField!
     private var edgeRows: [Edge: EdgeActionRow] = [:]
     private var probeView: TrackpadProbeView!
 
@@ -56,6 +58,7 @@ final class SettingsWindowController: NSWindowController {
 
         root.addArrangedSubview(title)
         root.addArrangedSubview(subtitle)
+        root.addArrangedSubview(makeSystemSection())
         root.addArrangedSubview(makeThresholdSection())
         root.addArrangedSubview(makeActionsSection())
         root.addArrangedSubview(makeProbeSection())
@@ -75,6 +78,39 @@ final class SettingsWindowController: NSWindowController {
         ])
     }
 
+    private func makeSystemSection() -> NSView {
+        let stack = sectionStack(title: "System")
+
+        let row = NSStackView()
+        row.orientation = .horizontal
+        row.alignment = .centerY
+        row.spacing = 12
+        row.translatesAutoresizingMaskIntoConstraints = false
+
+        launchAtLoginCheckbox = NSButton(
+            checkboxWithTitle: "Launch at Login",
+            target: self,
+            action: #selector(toggleLaunchAtLogin)
+        )
+        launchAtLoginCheckbox.state = LoginItemController.isEnabled ? .on : .off
+        launchAtLoginCheckbox.isEnabled = LoginItemController.isSupported
+
+        launchAtLoginStatusLabel = NSTextField(labelWithString: LoginItemController.statusText)
+        launchAtLoginStatusLabel.font = .systemFont(ofSize: 12)
+        launchAtLoginStatusLabel.textColor = .secondaryLabelColor
+
+        row.addArrangedSubview(launchAtLoginCheckbox)
+        row.addArrangedSubview(launchAtLoginStatusLabel)
+
+        NSLayoutConstraint.activate([
+            launchAtLoginCheckbox.widthAnchor.constraint(equalToConstant: 190),
+            launchAtLoginStatusLabel.widthAnchor.constraint(greaterThanOrEqualToConstant: 300)
+        ])
+
+        stack.addArrangedSubview(row)
+        return stack
+    }
+
     private func makeThresholdSection() -> NSView {
         let stack = sectionStack(title: "Recognition")
 
@@ -87,6 +123,10 @@ final class SettingsWindowController: NSWindowController {
         stack.addArrangedSubview(labeledControl("Inward travel", detail: "Required movement toward center", minLabel: "Short swipe", maxLabel: "Long swipe", control: minTravelSlider))
         stack.addArrangedSubview(labeledControl("Drift limit", detail: "Maximum movement across the wrong axis", minLabel: "Strict line", maxLabel: "Loose line", control: crossAxisSlider))
         stack.addArrangedSubview(labeledControl("Cooldown", detail: "Minimum seconds between triggers", minLabel: "More repeat", maxLabel: "Less repeat", control: cooldownSlider))
+
+        let restoreButton = NSButton(title: "Restore Recognition Defaults", target: self, action: #selector(restoreRecognitionDefaults))
+        restoreButton.bezelStyle = .rounded
+        stack.addArrangedSubview(restoreButton)
 
         debugCheckbox = NSButton(checkboxWithTitle: "Log raw gesture touch counts to Console", target: self, action: #selector(updateSettingsFromControls))
         debugCheckbox.state = settings.debugLogging ? .on : .off
@@ -200,6 +240,30 @@ final class SettingsWindowController: NSWindowController {
         let slider = NSSlider(value: value, minValue: min, maxValue: max, target: self, action: #selector(updateSettingsFromControls))
         slider.isContinuous = false
         return slider
+    }
+
+    @objc private func toggleLaunchAtLogin() {
+        let shouldEnable = launchAtLoginCheckbox.state == .on
+
+        do {
+            try LoginItemController.setEnabled(shouldEnable)
+        } catch {
+            launchAtLoginStatusLabel.stringValue = "Failed: \(error.localizedDescription)"
+            launchAtLoginCheckbox.state = LoginItemController.isEnabled ? .on : .off
+            return
+        }
+
+        launchAtLoginCheckbox.state = LoginItemController.isEnabled ? .on : .off
+        launchAtLoginStatusLabel.stringValue = LoginItemController.statusText
+    }
+
+    @objc private func restoreRecognitionDefaults() {
+        let defaults = EdgeGestureConfig()
+        edgeBandSlider.doubleValue = defaults.edgeBand
+        minTravelSlider.doubleValue = defaults.minTravel
+        crossAxisSlider.doubleValue = defaults.maxCrossAxisTravel
+        cooldownSlider.doubleValue = defaults.cooldown
+        updateSettingsFromControls()
     }
 
     @objc func updateSettingsFromControls() {

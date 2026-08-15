@@ -20,6 +20,8 @@ For background recognition, the app first tries the private `MultitouchSupport` 
 swift run EdgeSwipe
 ```
 
+The settings window includes a Launch at Login checkbox. It uses `SMAppService.mainApp`, so it is intended for the packaged `.app` bundle rather than a `swift run` process.
+
 ## Built-in Actions
 
 Each edge can run one of these built-in actions:
