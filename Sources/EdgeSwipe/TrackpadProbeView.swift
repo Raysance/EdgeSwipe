@@ -4,15 +4,16 @@ import EdgeSwipeCore
 @MainActor
 final class TrackpadProbeView: NSView {
     private let recognizer: EdgeGestureRecognizer
-    private let onGesture: (Edge) -> Void
+    private let onGesture: (GestureTrigger) -> Void
     nonisolated(unsafe) private var observer: NSObjectProtocol?
     nonisolated(unsafe) private var animationTimer: Timer?
     private var animationPhase: CGFloat = 0
+    private var cornerAnimationPhase: CGFloat = 0
     private var points: [CGPoint] = []
-    private var lastGestureText = "Waiting for two-finger edge swipe"
+    private var lastGestureText = "Waiting for edge or corner swipe"
 
-    init(config: EdgeGestureConfig, onGesture: @escaping (Edge) -> Void) {
-        self.recognizer = EdgeGestureRecognizer(config: config)
+    init(edgeConfig: EdgeGestureConfig, cornerConfig: EdgeGestureConfig, onGesture: @escaping (GestureTrigger) -> Void) {
+        self.recognizer = EdgeGestureRecognizer(edgeConfig: edgeConfig, cornerConfig: cornerConfig)
         self.onGesture = onGesture
         super.init(frame: NSRect(x: 0, y: 0, width: 680, height: 180))
         wantsLayer = true
@@ -50,8 +51,9 @@ final class TrackpadProbeView: NSView {
         NSSize(width: 680, height: 180)
     }
 
-    func updateConfig(_ config: EdgeGestureConfig) {
-        recognizer.config = config
+    func updateConfig(edgeConfig: EdgeGestureConfig, cornerConfig: EdgeGestureConfig) {
+        recognizer.edgeConfig = edgeConfig
+        recognizer.cornerConfig = cornerConfig
         needsDisplay = true
     }
 
@@ -77,6 +79,7 @@ final class TrackpadProbeView: NSView {
 
         drawPanelBackground()
         drawEdgeBands()
+        drawCornerZones()
         drawTravelThresholds()
         drawDriftGuide()
         drawCooldownIndicator()
@@ -88,8 +91,10 @@ final class TrackpadProbeView: NSView {
         animationTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 30.0, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 guard let self else { return }
-                let cooldown = max(0.1, CGFloat(self.recognizer.config.cooldown))
-                self.animationPhase = (self.animationPhase + (1.0 / 30.0) / cooldown).truncatingRemainder(dividingBy: 1)
+                let edgeCooldown = max(0.1, CGFloat(self.recognizer.edgeConfig.cooldown))
+                let cornerCooldown = max(0.1, CGFloat(self.recognizer.cornerConfig.cooldown))
+                self.animationPhase = (self.animationPhase + (1.0 / 30.0) / edgeCooldown).truncatingRemainder(dividingBy: 1)
+                self.cornerAnimationPhase = (self.cornerAnimationPhase + (1.0 / 30.0) / cornerCooldown).truncatingRemainder(dividingBy: 1)
                 self.needsDisplay = true
             }
         }
@@ -106,7 +111,7 @@ final class TrackpadProbeView: NSView {
     }
 
     private func drawEdgeBands() {
-        let band = CGFloat(recognizer.config.edgeBand)
+        let band = CGFloat(recognizer.edgeConfig.edgeBand)
         let color = NSColor.systemBlue.withAlphaComponent(0.16)
         let stroke = NSColor.systemBlue.withAlphaComponent(0.55)
 
@@ -127,9 +132,31 @@ final class TrackpadProbeView: NSView {
         drawTinyLabel("Edge band", at: CGPoint(x: 10, y: 10), color: .systemBlue)
     }
 
+    private func drawCornerZones() {
+        let band = CGFloat(recognizer.cornerConfig.edgeBand)
+        let cornerSize = CGSize(width: bounds.width * band, height: bounds.height * band)
+        let cornerRects = [
+            NSRect(x: 0, y: bounds.height - cornerSize.height, width: cornerSize.width, height: cornerSize.height),
+            NSRect(x: bounds.width - cornerSize.width, y: bounds.height - cornerSize.height, width: cornerSize.width, height: cornerSize.height),
+            NSRect(x: 0, y: 0, width: cornerSize.width, height: cornerSize.height),
+            NSRect(x: bounds.width - cornerSize.width, y: 0, width: cornerSize.width, height: cornerSize.height)
+        ]
+
+        NSColor.systemTeal.withAlphaComponent(0.18).setFill()
+        NSColor.systemTeal.withAlphaComponent(0.55).setStroke()
+        for rect in cornerRects {
+            let path = NSBezierPath(roundedRect: rect.integral.insetBy(dx: 1, dy: 1), xRadius: 4, yRadius: 4)
+            path.fill()
+            path.lineWidth = 1
+            path.stroke()
+        }
+
+        drawTinyLabel("1-finger corners", at: CGPoint(x: bounds.width - 110, y: bounds.height - 24), color: .systemTeal)
+    }
+
     private func drawTravelThresholds() {
-        let band = CGFloat(recognizer.config.edgeBand)
-        let travel = CGFloat(recognizer.config.minTravel)
+        let band = CGFloat(recognizer.edgeConfig.edgeBand)
+        let travel = CGFloat(recognizer.edgeConfig.minTravel)
         let leftX = min(bounds.width, bounds.width * (band + travel))
         let topY = max(0, bounds.height * (1 - band - travel))
 
@@ -148,23 +175,47 @@ final class TrackpadProbeView: NSView {
     }
 
     private func drawDriftGuide() {
-        let drift = CGFloat(recognizer.config.maxCrossAxisTravel)
+        let drift = CGFloat(recognizer.edgeConfig.maxCrossAxisTravel)
         let corridor = max(12, bounds.height * drift * 0.55)
         let leftGuideY = bounds.midY
-        let leftStart = CGPoint(x: bounds.width * CGFloat(recognizer.config.edgeBand), y: leftGuideY)
-        let leftEnd = CGPoint(x: min(bounds.width * 0.46, leftStart.x + bounds.width * CGFloat(recognizer.config.minTravel)), y: leftGuideY)
+        let leftStart = CGPoint(x: bounds.width * CGFloat(recognizer.edgeConfig.edgeBand), y: leftGuideY)
+        let leftEnd = CGPoint(x: min(bounds.width * 0.46, leftStart.x + bounds.width * CGFloat(recognizer.edgeConfig.minTravel)), y: leftGuideY)
 
         drawDriftCorridor(from: leftStart, to: leftEnd, radius: corridor / 2)
         drawDirectionArrow(from: leftStart, to: leftEnd, color: .systemGreen)
 
         let topGuideX = bounds.midX
-        let topStart = CGPoint(x: topGuideX, y: bounds.height * (1 - CGFloat(recognizer.config.edgeBand)))
-        let topEnd = CGPoint(x: topGuideX, y: max(bounds.height * 0.52, topStart.y - bounds.height * CGFloat(recognizer.config.minTravel)))
+        let topStart = CGPoint(x: topGuideX, y: bounds.height * (1 - CGFloat(recognizer.edgeConfig.edgeBand)))
+        let topEnd = CGPoint(x: topGuideX, y: max(bounds.height * 0.52, topStart.y - bounds.height * CGFloat(recognizer.edgeConfig.minTravel)))
 
         drawDriftCorridor(from: topStart, to: topEnd, radius: corridor / 2)
         drawDirectionArrow(from: topStart, to: topEnd, color: .systemGreen)
 
+        drawCornerDirectionGuides()
         drawTinyLabel("Drift limit", at: CGPoint(x: bounds.width * 0.34, y: bounds.midY + corridor / 2 + 8), color: .systemGreen)
+    }
+
+    private func drawCornerDirectionGuides() {
+        let band = CGFloat(recognizer.cornerConfig.edgeBand)
+        let travel = CGFloat(recognizer.cornerConfig.minTravel)
+        let starts = [
+            CGPoint(x: bounds.width * band * 0.5, y: bounds.height * (1 - band * 0.5)),
+            CGPoint(x: bounds.width * (1 - band * 0.5), y: bounds.height * (1 - band * 0.5)),
+            CGPoint(x: bounds.width * band * 0.5, y: bounds.height * band * 0.5),
+            CGPoint(x: bounds.width * (1 - band * 0.5), y: bounds.height * band * 0.5)
+        ]
+
+        let deltas = [
+            CGPoint(x: bounds.width * travel, y: -bounds.height * travel),
+            CGPoint(x: -bounds.width * travel, y: -bounds.height * travel),
+            CGPoint(x: bounds.width * travel, y: bounds.height * travel),
+            CGPoint(x: -bounds.width * travel, y: bounds.height * travel)
+        ]
+
+        for (start, delta) in zip(starts, deltas) {
+            let end = CGPoint(x: start.x + delta.x, y: start.y + delta.y)
+            drawDirectionArrow(from: start, to: end, color: .systemTeal)
+        }
     }
 
     private func drawDriftCorridor(from start: CGPoint, to end: CGPoint, radius: CGFloat) {
@@ -211,20 +262,25 @@ final class TrackpadProbeView: NSView {
     }
 
     private func drawCooldownIndicator() {
-        let cooldown = CGFloat(recognizer.config.cooldown)
-        let track = NSRect(x: bounds.width - 166, y: 14, width: 142, height: 8)
-        let fillWidth = track.width * animationPhase
+        let edgeTrack = NSRect(x: bounds.width - 166, y: 14, width: 142, height: 6)
+        let cornerTrack = NSRect(x: bounds.width - 166, y: 27, width: 142, height: 6)
 
-        let trackPath = NSBezierPath(roundedRect: track, xRadius: 4, yRadius: 4)
-        NSColor.systemOrange.withAlphaComponent(0.16 + min(0.12, cooldown / 10)).setFill()
+        drawCooldownTrack(edgeTrack, phase: animationPhase, color: .systemOrange)
+        drawCooldownTrack(cornerTrack, phase: cornerAnimationPhase, color: .systemTeal)
+
+        drawTinyLabel("Edge cooldown", at: CGPoint(x: edgeTrack.minX, y: edgeTrack.maxY + 1), color: .systemOrange)
+        drawTinyLabel("Corner", at: CGPoint(x: cornerTrack.minX - 48, y: cornerTrack.minY - 2), color: .systemTeal)
+    }
+
+    private func drawCooldownTrack(_ track: NSRect, phase: CGFloat, color: NSColor) {
+        let trackPath = NSBezierPath(roundedRect: track, xRadius: 3, yRadius: 3)
+        color.withAlphaComponent(0.16).setFill()
         trackPath.fill()
 
-        let fillRect = NSRect(x: track.minX, y: track.minY, width: fillWidth, height: track.height)
-        let fillPath = NSBezierPath(roundedRect: fillRect, xRadius: 4, yRadius: 4)
-        NSColor.systemOrange.withAlphaComponent(0.75).setFill()
+        let fillRect = NSRect(x: track.minX, y: track.minY, width: track.width * phase, height: track.height)
+        let fillPath = NSBezierPath(roundedRect: fillRect, xRadius: 3, yRadius: 3)
+        color.withAlphaComponent(0.75).setFill()
         fillPath.fill()
-
-        drawTinyLabel("Cooldown", at: CGPoint(x: track.minX, y: track.maxY + 6), color: .systemOrange)
     }
 
     private func drawText() {
@@ -270,10 +326,10 @@ final class TrackpadProbeView: NSView {
         }
 
         if let gesture = recognizer.ingest(samples) {
-            lastGestureText = "Recognized \(gesture.edge.displayName)"
-            onGesture(gesture.edge)
+            lastGestureText = "Recognized \(gesture.trigger.displayName)"
+            onGesture(gesture.trigger)
         } else if touches.isEmpty {
-            lastGestureText = "Waiting for two-finger edge swipe"
+            lastGestureText = "Waiting for edge or corner swipe"
         } else {
             lastGestureText = "\(touches.count) active touch(es)"
         }

@@ -21,7 +21,7 @@ func checkLeftEdgeSwipe() {
         TouchSample(id: 2, x: 0.34, y: 0.55, phase: .moved, timestamp: 1.2)
     ])
 
-    expect(gesture?.edge == .left, "left edge should trigger after inward travel")
+    expect(gesture?.trigger == .left, "left edge should trigger after inward travel")
 }
 
 func checkTopEdgeSwipe() {
@@ -37,7 +37,7 @@ func checkTopEdgeSwipe() {
         TouchSample(id: 2, x: 0.55, y: 0.69, phase: .moved, timestamp: 2.2)
     ])
 
-    expect(gesture?.edge == .top, "top edge should trigger after downward travel")
+    expect(gesture?.trigger == .top, "top edge should trigger after downward travel")
 }
 
 func checkDiagonalRejection() {
@@ -58,7 +58,54 @@ func checkDiagonalRejection() {
     expect(gesture == nil, "diagonal movement should be rejected")
 }
 
+func checkCornerSwipe() {
+    let recognizer = EdgeGestureRecognizer()
+
+    expect(recognizer.ingest([
+        TouchSample(id: 1, x: 0.02, y: 0.98, phase: .began, timestamp: 4.0)
+    ]) == nil, "corner should not trigger on begin")
+
+    let gesture = recognizer.ingest([
+        TouchSample(id: 1, x: 0.24, y: 0.76, phase: .moved, timestamp: 4.2)
+    ])
+
+    expect(gesture?.trigger == .topLeft, "top-left corner should trigger after diagonal inward travel")
+}
+
+func checkSingleFingerEdgeRejection() {
+    let recognizer = EdgeGestureRecognizer()
+
+    _ = recognizer.ingest([
+        TouchSample(id: 1, x: 0.02, y: 0.50, phase: .began, timestamp: 5.0)
+    ])
+
+    let gesture = recognizer.ingest([
+        TouchSample(id: 1, x: 0.25, y: 0.50, phase: .moved, timestamp: 5.2)
+    ])
+
+    expect(gesture == nil, "single finger from a non-corner edge should not trigger")
+}
+
+func checkIndependentCornerConfig() {
+    let edgeConfig = EdgeGestureConfig(edgeBand: 0.03, minTravel: 0.40, maxCrossAxisTravel: 0.04, cooldown: 0.5)
+    let cornerConfig = EdgeGestureConfig(edgeBand: 0.10, minTravel: 0.12, maxCrossAxisTravel: 0.20, cooldown: 0.1)
+    let recognizer = EdgeGestureRecognizer(edgeConfig: edgeConfig, cornerConfig: cornerConfig)
+
+    _ = recognizer.ingest([
+        TouchSample(id: 1, x: 0.07, y: 0.96, phase: .began, timestamp: 6.0)
+    ])
+
+    let gesture = recognizer.ingest([
+        TouchSample(id: 1, x: 0.22, y: 0.81, phase: .moved, timestamp: 6.2)
+    ])
+
+    expect(gesture?.trigger == .topLeft, "corner should use corner config independently from edge config")
+}
+
 checkLeftEdgeSwipe()
 checkTopEdgeSwipe()
 checkDiagonalRejection()
+checkCornerSwipe()
+checkSingleFingerEdgeRejection()
+checkIndependentCornerConfig()
 print("EdgeSwipe core checks passed")

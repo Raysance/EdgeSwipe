@@ -76,7 +76,7 @@ final class PrivateMultitouchMonitor {
     init(settings: AppSettings, runner: ActionRunner) {
         self.settings = settings
         self.runner = runner
-        self.recognizer = EdgeGestureRecognizer(config: settings.config)
+        self.recognizer = EdgeGestureRecognizer(edgeConfig: settings.config, cornerConfig: settings.cornerConfig)
     }
 
     var isRunning: Bool {
@@ -85,7 +85,8 @@ final class PrivateMultitouchMonitor {
 
     func update(settings: AppSettings) {
         self.settings = settings
-        recognizer.config = settings.config
+        recognizer.edgeConfig = settings.config
+        recognizer.cornerConfig = settings.cornerConfig
     }
 
     func start() -> Bool {
@@ -162,7 +163,7 @@ final class PrivateMultitouchMonitor {
             return
         }
 
-        runner.run(edge: gesture.edge, action: settings.action(for: gesture.edge))
+        runner.run(trigger: gesture.trigger, action: settings.action(for: gesture.trigger))
     }
 
     private func loadFramework() -> Bool {

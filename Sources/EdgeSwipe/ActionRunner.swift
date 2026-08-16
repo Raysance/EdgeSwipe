@@ -7,38 +7,38 @@ import EdgeSwipeCore
 final class ActionRunner {
     private var hudWindow: NSWindow?
 
-    func run(edge: Edge, action: EdgeActionSetting) {
+    func run(trigger: GestureTrigger, action: EdgeActionSetting) {
         switch action.kind {
         case .disabled:
             return
         case .showHUD:
-            showHUD(edge: edge)
+            showHUD(trigger: trigger)
         case .open:
-            open(action.payload)
+            open(action.payload, trigger: trigger)
         case .runShell:
-            runShell(action.payload, edge: edge)
+            runShell(action.payload, trigger: trigger)
         case .controlCenter:
-            toggleControlCenter(edge: edge)
+            toggleControlCenter(trigger: trigger)
         case .lockScreen:
-            lockScreen(edge: edge)
+            lockScreen(trigger: trigger)
         case .screenshot:
-            openSystemApp(path: "/System/Applications/Utilities/Screenshot.app", edge: edge, label: "Screenshot")
+            openSystemApp(path: "/System/Applications/Utilities/Screenshot.app", trigger: trigger, label: "Screenshot")
         case .switchApplication:
-            switchApplication(action.payload, edge: edge)
+            switchApplication(action.payload, trigger: trigger)
         case .missionControl, .appExpose, .showDesktop, .launchpad, .notificationCenter, .startScreenSaver:
-            showHUD(edge: edge, text: "Action removed")
+            showHUD(trigger: trigger, text: "Action removed")
         }
     }
 
-    func test(edge: Edge, action: EdgeActionSetting) {
+    func test(trigger: GestureTrigger, action: EdgeActionSetting) {
         if action.kind == .disabled {
-            showHUD(edge: edge, text: "\(edge.displayName) is disabled")
+            showHUD(trigger: trigger, text: "\(trigger.shortDisplayName) is disabled")
         } else {
-            run(edge: edge, action: action)
+            run(trigger: trigger, action: action)
         }
     }
 
-    private func showHUD(edge: Edge, text: String? = nil) {
+    private func showHUD(trigger: GestureTrigger, text: String? = nil) {
         let screenFrame = NSScreen.main?.visibleFrame ?? NSRect(x: 0, y: 0, width: 900, height: 600)
         let width: CGFloat = 280
         let height: CGFloat = 96
@@ -61,7 +61,7 @@ final class ActionRunner {
         panel.isOpaque = false
         panel.ignoresMouseEvents = true
 
-        let label = NSTextField(labelWithString: text ?? "EdgeSwipe: \(edge.displayName)")
+        let label = NSTextField(labelWithString: text ?? "EdgeSwipe: \(trigger.displayName)")
         label.font = .systemFont(ofSize: 22, weight: .semibold)
         label.textColor = .white
         label.alignment = .center
@@ -102,10 +102,10 @@ final class ActionRunner {
         }
     }
 
-    private func runShell(_ command: String, edge: Edge, successText: String = "Command started") {
+    private func runShell(_ command: String, trigger: GestureTrigger, successText: String = "Command started") {
         let trimmed = command.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
-            showHUD(edge: edge, text: "No shell command")
+            showHUD(trigger: trigger, text: "No shell command")
             return
         }
 
@@ -117,17 +117,17 @@ final class ActionRunner {
 
         do {
             try process.run()
-            showHUD(edge: edge, text: successText)
+            showHUD(trigger: trigger, text: successText)
         } catch {
-            showHUD(edge: edge, text: "Command failed")
+            showHUD(trigger: trigger, text: "Command failed")
             NSLog("EdgeSwipe: shell action failed: \(error)")
         }
     }
 
-    private func open(_ target: String) {
+    private func open(_ target: String, trigger: GestureTrigger) {
         let trimmed = target.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
-            showHUD(edge: .left, text: "No URL or file")
+            showHUD(trigger: trigger, text: "No URL or file")
             return
         }
 
@@ -139,26 +139,26 @@ final class ActionRunner {
         NSWorkspace.shared.open(URL(fileURLWithPath: NSString(string: trimmed).expandingTildeInPath))
     }
 
-    private func openSystemApp(path: String, edge: Edge, label: String) {
+    private func openSystemApp(path: String, trigger: GestureTrigger, label: String) {
         let url = URL(fileURLWithPath: path)
         guard FileManager.default.fileExists(atPath: path) else {
-            showHUD(edge: edge, text: "\(label) unavailable")
+            showHUD(trigger: trigger, text: "\(label) unavailable")
             return
         }
 
         NSWorkspace.shared.openApplication(at: url, configuration: NSWorkspace.OpenConfiguration()) { [weak self] _, error in
             Task { @MainActor in
                 if let error {
-                    self?.showHUD(edge: edge, text: "\(label) failed")
+                    self?.showHUD(trigger: trigger, text: "\(label) failed")
                     NSLog("EdgeSwipe: failed to open \(label): \(error)")
                 } else {
-                    self?.showHUD(edge: edge, text: label)
+                    self?.showHUD(trigger: trigger, text: label)
                 }
             }
         }
     }
 
-    private func toggleControlCenter(edge: Edge) {
+    private func toggleControlCenter(trigger: GestureTrigger) {
         let script = """
         tell application "System Events"
           tell application process "SystemUIServer"
@@ -179,22 +179,22 @@ final class ActionRunner {
         """
 
         if !AXIsProcessTrusted() {
-            noteMissingAccessibility(edge: edge)
+            noteMissingAccessibility(trigger: trigger)
             return
         }
 
-        runShell("osascript -e " + shellQuoted(script), edge: edge, successText: "Control Center")
+        runShell("osascript -e " + shellQuoted(script), trigger: trigger, successText: "Control Center")
     }
 
     private typealias SACLockScreenImmediate = @convention(c) () -> Void
 
-    private func lockScreen(edge: Edge) {
+    private func lockScreen(trigger: GestureTrigger) {
         if callSACLockScreenImmediate() {
-            showHUD(edge: edge, text: "Lock Screen")
+            showHUD(trigger: trigger, text: "Lock Screen")
             return
         }
 
-        runShell("/usr/bin/pmset displaysleepnow", edge: edge, successText: "Display Sleep")
+        runShell("/usr/bin/pmset displaysleepnow", trigger: trigger, successText: "Display Sleep")
     }
 
     private func callSACLockScreenImmediate() -> Bool {
@@ -208,10 +208,10 @@ final class ActionRunner {
         return true
     }
 
-    private func switchApplication(_ target: String, edge: Edge) {
+    private func switchApplication(_ target: String, trigger: GestureTrigger) {
         let trimmed = target.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
-            showHUD(edge: edge, text: "No app target")
+            showHUD(trigger: trigger, text: "No app target")
             return
         }
 
@@ -225,19 +225,19 @@ final class ActionRunner {
         }
 
         guard let runningApp else {
-            showHUD(edge: edge, text: "App not running")
+            showHUD(trigger: trigger, text: "App not running")
             return
         }
 
         if AXIsProcessTrusted() {
             restoreMinimizedWindows(for: runningApp)
         } else {
-            noteMissingAccessibility(edge: edge)
+            noteMissingAccessibility(trigger: trigger)
         }
 
         runningApp.unhide()
         runningApp.activate(options: [.activateAllWindows, .activateIgnoringOtherApps])
-        showHUD(edge: edge, text: runningApp.localizedName ?? "Switch App")
+        showHUD(trigger: trigger, text: runningApp.localizedName ?? "Switch App")
     }
 
     @discardableResult
@@ -267,9 +267,9 @@ final class ActionRunner {
         return restored
     }
 
-    private func noteMissingAccessibility(edge: Edge) {
+    private func noteMissingAccessibility(trigger: GestureTrigger) {
         _ = AXIsProcessTrustedWithOptions(["AXTrustedCheckOptionPrompt": false] as CFDictionary)
-        showHUD(edge: edge, text: "Accessibility Needed")
+        showHUD(trigger: trigger, text: "Accessibility Needed")
     }
 
     private func shellQuoted(_ text: String) -> String {

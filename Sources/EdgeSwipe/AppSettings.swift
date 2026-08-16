@@ -73,22 +73,60 @@ struct EdgeActionSetting: Codable, Sendable {
 
 struct AppSettings: Codable, Sendable {
     var config: EdgeGestureConfig
+    var cornerConfig: EdgeGestureConfig
     var actions: [String: EdgeActionSetting]
     var debugLogging: Bool
 
     static let defaults = AppSettings(
         config: EdgeGestureConfig(),
+        cornerConfig: EdgeGestureConfig(),
         actions: [
-            Edge.left.rawValue: EdgeActionSetting(kind: .showHUD, payload: ""),
-            Edge.top.rawValue: EdgeActionSetting(kind: .showHUD, payload: ""),
-            Edge.bottom.rawValue: EdgeActionSetting(kind: .showHUD, payload: ""),
-            Edge.right.rawValue: EdgeActionSetting(kind: .disabled, payload: "")
+            GestureTrigger.left.rawValue: EdgeActionSetting(kind: .showHUD, payload: ""),
+            GestureTrigger.top.rawValue: EdgeActionSetting(kind: .showHUD, payload: ""),
+            GestureTrigger.bottom.rawValue: EdgeActionSetting(kind: .showHUD, payload: ""),
+            GestureTrigger.right.rawValue: EdgeActionSetting(kind: .disabled, payload: ""),
+            GestureTrigger.topLeft.rawValue: EdgeActionSetting(kind: .disabled, payload: ""),
+            GestureTrigger.topRight.rawValue: EdgeActionSetting(kind: .disabled, payload: ""),
+            GestureTrigger.bottomLeft.rawValue: EdgeActionSetting(kind: .disabled, payload: ""),
+            GestureTrigger.bottomRight.rawValue: EdgeActionSetting(kind: .disabled, payload: "")
         ],
         debugLogging: false
     )
 
-    func action(for edge: Edge) -> EdgeActionSetting {
-        let setting = actions[edge.rawValue] ?? .disabled
+    init(config: EdgeGestureConfig, cornerConfig: EdgeGestureConfig, actions: [String: EdgeActionSetting], debugLogging: Bool) {
+        self.config = config
+        self.cornerConfig = cornerConfig
+        self.actions = actions
+        self.debugLogging = debugLogging
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case config
+        case cornerConfig
+        case actions
+        case debugLogging
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let edgeConfig = try container.decodeIfPresent(EdgeGestureConfig.self, forKey: .config) ?? EdgeGestureConfig()
+
+        self.config = edgeConfig
+        self.cornerConfig = try container.decodeIfPresent(EdgeGestureConfig.self, forKey: .cornerConfig) ?? edgeConfig
+        self.actions = try container.decodeIfPresent([String: EdgeActionSetting].self, forKey: .actions) ?? Self.defaults.actions
+        self.debugLogging = try container.decodeIfPresent(Bool.self, forKey: .debugLogging) ?? false
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(config, forKey: .config)
+        try container.encode(cornerConfig, forKey: .cornerConfig)
+        try container.encode(actions, forKey: .actions)
+        try container.encode(debugLogging, forKey: .debugLogging)
+    }
+
+    func action(for trigger: GestureTrigger) -> EdgeActionSetting {
+        let setting = actions[trigger.rawValue] ?? .disabled
         return setting.kind.isSelectable ? setting : .disabled
     }
 }

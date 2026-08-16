@@ -16,7 +16,8 @@ final class GestureEventMonitor {
         self.store = store
         self.runner = runner
         self.settings = store.load()
-        self.recognizer.config = settings.config
+        self.recognizer.edgeConfig = settings.config
+        self.recognizer.cornerConfig = settings.cornerConfig
         self.privateMonitor = PrivateMultitouchMonitor(settings: settings, runner: runner)
 
         settingsObserver = NotificationCenter.default.addObserver(
@@ -28,7 +29,8 @@ final class GestureEventMonitor {
             Task { @MainActor [weak self, settings] in
                 guard let self else { return }
                 self.settings = settings
-                self.recognizer.config = settings.config
+                self.recognizer.edgeConfig = settings.config
+                self.recognizer.cornerConfig = settings.cornerConfig
                 self.privateMonitor?.update(settings: settings)
             }
         }
@@ -94,8 +96,8 @@ final class GestureEventMonitor {
             return
         }
 
-        let action = settings.action(for: gesture.edge)
-        runner.run(edge: gesture.edge, action: action)
+        let action = settings.action(for: gesture.trigger)
+        runner.run(trigger: gesture.trigger, action: action)
     }
 
     private func touchSamples(from event: NSEvent) -> [TouchSample] {
