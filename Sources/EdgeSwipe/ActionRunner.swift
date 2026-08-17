@@ -6,6 +6,7 @@ import EdgeSwipeCore
 @MainActor
 final class ActionRunner {
     private var hudWindow: NSWindow?
+    private var lastHiddenWindow: FrontWindowInfo?
 
     func run(trigger: GestureTrigger, action: EdgeActionSetting) {
         switch action.kind {
@@ -23,6 +24,10 @@ final class ActionRunner {
             lockScreen(trigger: trigger)
         case .screenshot:
             openSystemApp(path: "/System/Applications/Utilities/Screenshot.app", trigger: trigger, label: "Screenshot")
+        case .hideFrontWindow:
+            hideFrontWindow(trigger: trigger)
+        case .restoreHiddenWindow:
+            restoreHiddenWindow(trigger: trigger)
         case .switchApplication:
             switchApplication(action.payload, trigger: trigger)
         case .missionControl, .appExpose, .showDesktop, .launchpad, .notificationCenter, .startScreenSaver:
@@ -238,6 +243,187 @@ final class ActionRunner {
         runningApp.unhide()
         runningApp.activate(options: [.activateAllWindows, .activateIgnoringOtherApps])
         showHUD(trigger: trigger, text: runningApp.localizedName ?? "Switch App")
+    }
+
+    private func hideFrontWindow(trigger: GestureTrigger) {
+        guard AXIsProcessTrusted() else {
+            noteMissingAccessibility(trigger: trigger)
+            return
+        }
+
+        guard let windowInfo = frontWindowInfoOnActiveScreen() else {
+            showHUD(trigger: trigger, text: "No window found")
+            return
+        }
+
+        let axApp = AXUIElementCreateApplication(windowInfo.processIdentifier)
+        let result = AXUIElementSetAttributeValue(axApp, kAXHiddenAttribute as CFString, kCFBooleanTrue)
+        lastHiddenWindow = windowInfo
+        if result == .success {
+            showHUD(trigger: trigger, text: "Window Hidden")
+        } else {
+            lastHiddenWindow = nil
+            showHUD(trigger: trigger, text: "Hide failed")
+            NSLog("EdgeSwipe: failed to hide app for window \(windowInfo.windowID): \(result.rawValue)")
+        }
+    }
+
+    private func restoreHiddenWindow(trigger: GestureTrigger) {
+        guard let windowInfo = lastHiddenWindow else {
+            showHUD(trigger: trigger, text: "No hidden window")
+            return
+        }
+
+        guard let runningApp = NSRunningApplication(processIdentifier: windowInfo.processIdentifier) else {
+            lastHiddenWindow = nil
+            showHUD(trigger: trigger, text: "App unavailable")
+            return
+        }
+
+        guard AXIsProcessTrusted() else {
+            noteMissingAccessibility(trigger: trigger)
+            return
+        }
+
+        let axApp = AXUIElementCreateApplication(windowInfo.processIdentifier)
+        let result = AXUIElementSetAttributeValue(axApp, kAXHiddenAttribute as CFString, kCFBooleanFalse)
+        if result != .success {
+            showHUD(trigger: trigger, text: "Restore failed")
+            NSLog("EdgeSwipe: failed to restore hidden app for window \(windowInfo.windowID): \(result.rawValue)")
+            return
+        }
+
+        runningApp.activate(options: [.activateAllWindows, .activateIgnoringOtherApps])
+        if let window = matchingWindow(in: axApp, windowInfo: windowInfo) {
+            AXUIElementPerformAction(window, kAXRaiseAction as CFString)
+            AXUIElementSetAttributeValue(axApp, kAXFocusedWindowAttribute as CFString, window)
+        }
+
+        lastHiddenWindow = nil
+        showHUD(trigger: trigger, text: runningApp.localizedName ?? "Window Restored")
+    }
+
+    private struct FrontWindowInfo {
+        let processIdentifier: pid_t
+        let windowID: CGWindowID
+        let title: String?
+        let bounds: CGRect
+    }
+
+    private func frontWindowInfoOnActiveScreen() -> FrontWindowInfo? {
+        guard let activeScreenBounds = activeScreenBounds(),
+              let windowList = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]]
+        else {
+            return nil
+        }
+
+        let ownProcessIdentifier = NSRunningApplication.current.processIdentifier
+
+        for info in windowList {
+            guard let layer = info[kCGWindowLayer as String] as? Int,
+                  layer == 0,
+                  let processIdentifier = info[kCGWindowOwnerPID as String] as? pid_t,
+                  processIdentifier != ownProcessIdentifier,
+                  let windowIDNumber = info[kCGWindowNumber as String] as? NSNumber,
+                  let boundsDictionary = info[kCGWindowBounds as String] as? [String: Any],
+                  let bounds = CGRect(dictionaryRepresentation: boundsDictionary as CFDictionary),
+                  bounds.intersects(activeScreenBounds)
+            else {
+                continue
+            }
+
+            let title = info[kCGWindowName as String] as? String
+            return FrontWindowInfo(
+                processIdentifier: processIdentifier,
+                windowID: CGWindowID(windowIDNumber.uint32Value),
+                title: title?.isEmpty == true ? nil : title,
+                bounds: bounds
+            )
+        }
+
+        return nil
+    }
+
+    private func activeScreenBounds() -> CGRect? {
+        let screen = screenContainingMouse() ?? NSScreen.main
+        guard let displayID = screen?.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID else {
+            return screen?.frame
+        }
+
+        return CGDisplayBounds(displayID)
+    }
+
+    private func screenContainingMouse() -> NSScreen? {
+        let mouseLocation = NSEvent.mouseLocation
+        return NSScreen.screens.first { screen in
+            screen.frame.contains(mouseLocation)
+        }
+    }
+
+    private func matchingWindow(in axApp: AXUIElement, windowInfo: FrontWindowInfo) -> AXUIElement? {
+        var windowsValue: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(axApp, kAXWindowsAttribute as CFString, &windowsValue) == .success,
+              let windows = windowsValue as? [AXUIElement]
+        else {
+            return nil
+        }
+
+        let titledMatch = windows.first { window in
+            guard let expectedTitle = windowInfo.title,
+                  let title = axStringAttribute(kAXTitleAttribute, from: window)
+            else {
+                return false
+            }
+
+            return title == expectedTitle && windowFrame(window).map { $0.intersects(windowInfo.bounds) } == true
+        }
+
+        if let titledMatch {
+            return titledMatch
+        }
+
+        return windows.first { window in
+            windowFrame(window).map { $0.intersects(windowInfo.bounds) } == true
+        }
+    }
+
+    private func axStringAttribute(_ attribute: String, from element: AXUIElement) -> String? {
+        var value: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(element, attribute as CFString, &value) == .success else {
+            return nil
+        }
+
+        return value as? String
+    }
+
+    private func windowFrame(_ window: AXUIElement) -> CGRect? {
+        var positionValue: CFTypeRef?
+        var sizeValue: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(window, kAXPositionAttribute as CFString, &positionValue) == .success,
+              AXUIElementCopyAttributeValue(window, kAXSizeAttribute as CFString, &sizeValue) == .success,
+              let position = positionValue,
+              let size = sizeValue
+        else {
+            return nil
+        }
+
+        guard CFGetTypeID(position) == AXValueGetTypeID(),
+              CFGetTypeID(size) == AXValueGetTypeID()
+        else {
+            return nil
+        }
+
+        let positionAXValue = position as! AXValue
+        let sizeAXValue = size as! AXValue
+        var point = CGPoint.zero
+        var windowSize = CGSize.zero
+        guard AXValueGetValue(positionAXValue, .cgPoint, &point),
+              AXValueGetValue(sizeAXValue, .cgSize, &windowSize)
+        else {
+            return nil
+        }
+
+        return CGRect(origin: point, size: windowSize)
     }
 
     @discardableResult

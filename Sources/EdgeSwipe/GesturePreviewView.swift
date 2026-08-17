@@ -156,6 +156,10 @@ final class GesturePreviewView: NSView {
             drawLockPreview(in: rect, progress: progress)
         case .screenshot:
             drawScreenshotPreview(in: rect, progress: progress)
+        case .hideFrontWindow:
+            drawSwitchAppPreview(in: rect, progress: 1 - progress)
+        case .restoreHiddenWindow:
+            drawSwitchAppPreview(in: rect, progress: progress)
         case .switchApplication:
             drawSwitchAppPreview(in: rect, progress: progress)
         case .missionControl, .appExpose, .showDesktop, .launchpad, .notificationCenter, .startScreenSaver:
@@ -649,6 +653,10 @@ final class GesturePreviewView: NSView {
             return .black
         case .screenshot:
             return .systemOrange
+        case .hideFrontWindow:
+            return .systemTeal
+        case .restoreHiddenWindow:
+            return .systemMint
         case .switchApplication:
             return .systemPurple
         case .missionControl, .appExpose, .showDesktop, .launchpad, .notificationCenter, .startScreenSaver:

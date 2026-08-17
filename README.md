@@ -18,6 +18,8 @@ Each gesture can be assigned one action:
 - Control Center
 - Lock Screen
 - Screenshot
+- Hide Front Window
+- Restore Hidden Window
 - Switch App
 - Run Shell
 - Open URL/File
@@ -74,6 +76,7 @@ The recognition window also includes a **Live Probe** area. Use it to try gestur
 Most actions work without extra setup, but some system-level actions depend on macOS Accessibility access:
 
 - **Control Center** clicks the Control Center menu-bar item through AppleScript/System Events.
+- **Hide Front Window** and **Restore Hidden Window** use Accessibility to hide and restore the frontmost app window on the active display.
 - **Switch App** can activate apps without Accessibility, but restoring minimized windows needs Accessibility permission.
 
 If a permission is missing, EdgeSwipe shows an `Accessibility Needed` HUD.

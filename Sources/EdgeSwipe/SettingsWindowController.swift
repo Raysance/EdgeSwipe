@@ -9,6 +9,8 @@ final class SettingsWindowController: NSWindowController {
     private var settings: AppSettings
     private var launchAtLoginCheckbox: NSButton!
     private var launchAtLoginStatusLabel: NSTextField!
+    private var accessibilityStatusLabel: NSTextField!
+    private var accessibilityButton: NSButton!
     private var triggerRows: [GestureTrigger: EdgeActionRow] = [:]
     private var previewView: GesturePreviewView!
     private var selectedPreviewTrigger: GestureTrigger = .left
@@ -119,11 +121,11 @@ final class SettingsWindowController: NSWindowController {
     private func makeSystemSection() -> NSView {
         let stack = sectionStack(title: "System")
 
-        let row = NSStackView()
-        row.orientation = .horizontal
-        row.alignment = .centerY
-        row.spacing = 12
-        row.translatesAutoresizingMaskIntoConstraints = false
+        let launchRow = NSStackView()
+        launchRow.orientation = .horizontal
+        launchRow.alignment = .centerY
+        launchRow.spacing = 12
+        launchRow.translatesAutoresizingMaskIntoConstraints = false
 
         launchAtLoginCheckbox = NSButton(
             checkboxWithTitle: "Launch at Login",
@@ -137,15 +139,34 @@ final class SettingsWindowController: NSWindowController {
         launchAtLoginStatusLabel.font = .systemFont(ofSize: 12)
         launchAtLoginStatusLabel.textColor = .secondaryLabelColor
 
-        row.addArrangedSubview(launchAtLoginCheckbox)
-        row.addArrangedSubview(launchAtLoginStatusLabel)
+        launchRow.addArrangedSubview(launchAtLoginCheckbox)
+        launchRow.addArrangedSubview(launchAtLoginStatusLabel)
+
+        let accessibilityRow = NSStackView()
+        accessibilityRow.orientation = .horizontal
+        accessibilityRow.alignment = .centerY
+        accessibilityRow.spacing = 12
+        accessibilityRow.translatesAutoresizingMaskIntoConstraints = false
+
+        accessibilityButton = NSButton(title: "Grant Accessibility...", target: self, action: #selector(requestAccessibilityAccess))
+        accessibilityButton.bezelStyle = .rounded
+
+        accessibilityStatusLabel = NSTextField(labelWithString: accessibilityStatusText)
+        accessibilityStatusLabel.font = .systemFont(ofSize: 12)
+        accessibilityStatusLabel.textColor = .secondaryLabelColor
+
+        accessibilityRow.addArrangedSubview(accessibilityButton)
+        accessibilityRow.addArrangedSubview(accessibilityStatusLabel)
 
         NSLayoutConstraint.activate([
             launchAtLoginCheckbox.widthAnchor.constraint(equalToConstant: 190),
-            launchAtLoginStatusLabel.widthAnchor.constraint(greaterThanOrEqualToConstant: 300)
+            launchAtLoginStatusLabel.widthAnchor.constraint(greaterThanOrEqualToConstant: 300),
+            accessibilityButton.widthAnchor.constraint(equalToConstant: 190),
+            accessibilityStatusLabel.widthAnchor.constraint(greaterThanOrEqualToConstant: 300)
         ])
 
-        stack.addArrangedSubview(row)
+        stack.addArrangedSubview(launchRow)
+        stack.addArrangedSubview(accessibilityRow)
         return stack
     }
 
@@ -208,6 +229,38 @@ final class SettingsWindowController: NSWindowController {
 
         launchAtLoginCheckbox.state = LoginItemController.isEnabled ? .on : .off
         launchAtLoginStatusLabel.stringValue = LoginItemController.statusText
+    }
+
+    @objc private func requestAccessibilityAccess() {
+        let options = ["AXTrustedCheckOptionPrompt": true] as CFDictionary
+        _ = AXIsProcessTrustedWithOptions(options)
+        openAccessibilityPrivacySettings()
+        refreshAccessibilityStatusSoon()
+    }
+
+    private var accessibilityStatusText: String {
+        AXIsProcessTrusted() ? "Accessibility access is granted." : "Required for Control Center, hiding windows, and restoring windows."
+    }
+
+    private func refreshAccessibilityStatusSoon() {
+        accessibilityStatusLabel.stringValue = accessibilityStatusText
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+            self?.accessibilityStatusLabel.stringValue = self?.accessibilityStatusText ?? ""
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) { [weak self] in
+            self?.accessibilityStatusLabel.stringValue = self?.accessibilityStatusText ?? ""
+        }
+    }
+
+    private func openAccessibilityPrivacySettings() {
+        let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")
+        if let url, NSWorkspace.shared.open(url) {
+            return
+        }
+
+        if let url = URL(string: "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_Accessibility") {
+            NSWorkspace.shared.open(url)
+        }
     }
 
     @objc func updateSettingsFromControls() {
@@ -641,6 +694,8 @@ final class EdgeActionRow: NSStackView {
         case .controlCenter: return "Clicks Control Center menu bar item"
         case .lockScreen: return "Uses login framework lock"
         case .screenshot: return "Opens Screenshot"
+        case .hideFrontWindow: return "Hides the front window on the active display"
+        case .restoreHiddenWindow: return "Restores the last window hidden by EdgeSwipe"
         case .switchApplication: return "Safari or com.apple.Safari"
         case .missionControl, .appExpose, .showDesktop, .launchpad, .notificationCenter, .startScreenSaver:
             return "Removed action"

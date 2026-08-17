@@ -9,6 +9,8 @@ enum GestureActionKind: String, Codable, CaseIterable, Sendable {
     case controlCenter
     case lockScreen
     case screenshot
+    case hideFrontWindow
+    case restoreHiddenWindow
     case switchApplication
 
     case missionControl
@@ -27,6 +29,8 @@ enum GestureActionKind: String, Codable, CaseIterable, Sendable {
             .controlCenter,
             .lockScreen,
             .screenshot,
+            .hideFrontWindow,
+            .restoreHiddenWindow,
             .switchApplication
         ]
     }
@@ -40,6 +44,8 @@ enum GestureActionKind: String, Codable, CaseIterable, Sendable {
         case .controlCenter: return "Control Center"
         case .lockScreen: return "Lock Screen"
         case .screenshot: return "Screenshot"
+        case .hideFrontWindow: return "Hide Front Window"
+        case .restoreHiddenWindow: return "Restore Hidden Window"
         case .switchApplication: return "Switch App"
         case .missionControl: return "Mission Control"
         case .appExpose: return "App Exposé"
@@ -54,7 +60,7 @@ enum GestureActionKind: String, Codable, CaseIterable, Sendable {
         switch self {
         case .runShell, .open, .switchApplication:
             return true
-        case .disabled, .showHUD, .controlCenter, .lockScreen, .screenshot, .missionControl, .appExpose, .showDesktop, .launchpad, .notificationCenter, .startScreenSaver:
+        case .disabled, .showHUD, .controlCenter, .lockScreen, .screenshot, .hideFrontWindow, .restoreHiddenWindow, .missionControl, .appExpose, .showDesktop, .launchpad, .notificationCenter, .startScreenSaver:
             return false
         }
     }
@@ -78,16 +84,26 @@ struct AppSettings: Codable, Sendable {
     var debugLogging: Bool
 
     static let defaults = AppSettings(
-        config: EdgeGestureConfig(),
-        cornerConfig: EdgeGestureConfig(),
+        config: EdgeGestureConfig(
+            edgeBand: 0.05,
+            minTravel: 0.17,
+            maxCrossAxisTravel: 0.20,
+            cooldown: 0.28
+        ),
+        cornerConfig: EdgeGestureConfig(
+            edgeBand: 0.059375260031434916,
+            minTravel: 0.14012289663461538,
+            maxCrossAxisTravel: 0.20,
+            cooldown: 0.28
+        ),
         actions: [
-            GestureTrigger.left.rawValue: EdgeActionSetting(kind: .showHUD, payload: ""),
-            GestureTrigger.top.rawValue: EdgeActionSetting(kind: .showHUD, payload: ""),
-            GestureTrigger.bottom.rawValue: EdgeActionSetting(kind: .showHUD, payload: ""),
-            GestureTrigger.right.rawValue: EdgeActionSetting(kind: .disabled, payload: ""),
-            GestureTrigger.topLeft.rawValue: EdgeActionSetting(kind: .disabled, payload: ""),
-            GestureTrigger.topRight.rawValue: EdgeActionSetting(kind: .disabled, payload: ""),
-            GestureTrigger.bottomLeft.rawValue: EdgeActionSetting(kind: .disabled, payload: ""),
+            GestureTrigger.left.rawValue: EdgeActionSetting(kind: .switchApplication, payload: "com.google.Chrome"),
+            GestureTrigger.top.rawValue: EdgeActionSetting(kind: .switchApplication, payload: "com.openai.codex"),
+            GestureTrigger.bottom.rawValue: EdgeActionSetting(kind: .switchApplication, payload: "com.tencent.xinWeChat"),
+            GestureTrigger.right.rawValue: EdgeActionSetting(kind: .switchApplication, payload: "com.microsoft.VSCode"),
+            GestureTrigger.topLeft.rawValue: EdgeActionSetting(kind: .showHUD, payload: ""),
+            GestureTrigger.topRight.rawValue: EdgeActionSetting(kind: .hideFrontWindow, payload: ""),
+            GestureTrigger.bottomLeft.rawValue: EdgeActionSetting(kind: .restoreHiddenWindow, payload: ""),
             GestureTrigger.bottomRight.rawValue: EdgeActionSetting(kind: .disabled, payload: "")
         ],
         debugLogging: false
