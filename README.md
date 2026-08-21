@@ -21,6 +21,7 @@ Each gesture can be assigned one action:
 - Hide Front Window
 - Restore Hidden Window
 - Switch App
+- Switch Window
 - Run Shell
 - Open URL/File
 
@@ -44,6 +45,7 @@ The settings window lets you:
 - Preview the selected gesture and assigned action.
 - Test an action without performing the gesture.
 - Pick a currently windowed app from the Switch App submenu.
+- Pick a specific visible window from the Switch Window submenu.
 - Enable **Launch at Login** for the packaged `.app` build.
 
 Actions that need extra input use the text field beside the action picker:
@@ -51,6 +53,7 @@ Actions that need extra input use the text field beside the action picker:
 - **Open URL/File** accepts a URL such as `https://apple.com` or a path such as `~/Documents`.
 - **Run Shell** accepts a shell command executed through `/bin/zsh -lc`.
 - **Switch App** stores an app bundle identifier, or can match a running app by name.
+- **Switch Window** stores a selected visible window and tries to focus that exact window later.
 
 ## Recognition Tuning
 
@@ -77,6 +80,8 @@ Most actions work without extra setup, but some system-level actions depend on m
 
 - **Control Center** clicks the Control Center menu-bar item through AppleScript/System Events.
 - **Hide Front Window** and **Restore Hidden Window** use Accessibility to hide and restore the frontmost app window on the active display.
+- **Switch Window** uses Accessibility to focus the selected window.
+- **Switch Window** thumbnails use Screen Recording permission.
 - **Switch App** can activate apps without Accessibility, but restoring minimized windows needs Accessibility permission.
 
 If a permission is missing, EdgeSwipe shows an `Accessibility Needed` HUD.

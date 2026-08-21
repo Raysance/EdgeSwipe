@@ -12,6 +12,7 @@ enum GestureActionKind: String, Codable, CaseIterable, Sendable {
     case hideFrontWindow
     case restoreHiddenWindow
     case switchApplication
+    case switchWindow
 
     case missionControl
     case appExpose
@@ -31,7 +32,8 @@ enum GestureActionKind: String, Codable, CaseIterable, Sendable {
             .screenshot,
             .hideFrontWindow,
             .restoreHiddenWindow,
-            .switchApplication
+            .switchApplication,
+            .switchWindow
         ]
     }
 
@@ -47,6 +49,7 @@ enum GestureActionKind: String, Codable, CaseIterable, Sendable {
         case .hideFrontWindow: return "Hide Front Window"
         case .restoreHiddenWindow: return "Restore Hidden Window"
         case .switchApplication: return "Switch App"
+        case .switchWindow: return "Switch Window"
         case .missionControl: return "Mission Control"
         case .appExpose: return "App Exposé"
         case .showDesktop: return "Show Desktop"
@@ -58,7 +61,7 @@ enum GestureActionKind: String, Codable, CaseIterable, Sendable {
 
     var usesPayload: Bool {
         switch self {
-        case .runShell, .open, .switchApplication:
+        case .runShell, .open, .switchApplication, .switchWindow:
             return true
         case .disabled, .showHUD, .controlCenter, .lockScreen, .screenshot, .hideFrontWindow, .restoreHiddenWindow, .missionControl, .appExpose, .showDesktop, .launchpad, .notificationCenter, .startScreenSaver:
             return false
@@ -67,6 +70,33 @@ enum GestureActionKind: String, Codable, CaseIterable, Sendable {
 
     var isSelectable: Bool {
         Self.allCases.contains(self)
+    }
+}
+
+struct WindowActionTarget: Codable, Sendable {
+    var bundleIdentifier: String
+    var appName: String
+    var title: String
+    var windowID: UInt32
+    var processIdentifier: Int32
+
+    var payload: String {
+        guard let data = try? JSONEncoder().encode(self),
+              let string = String(data: data, encoding: .utf8)
+        else {
+            return ""
+        }
+
+        return string
+    }
+
+    static func parse(_ payload: String) -> WindowActionTarget? {
+        let trimmed = payload.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let data = trimmed.data(using: .utf8) else {
+            return nil
+        }
+
+        return try? JSONDecoder().decode(WindowActionTarget.self, from: data)
     }
 }
 

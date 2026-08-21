@@ -6,6 +6,8 @@ final class GesturePreviewView: NSView {
     nonisolated(unsafe) private var animationTimer: Timer?
     private var trigger: GestureTrigger = .left
     private var action: EdgeActionSetting = .disabled
+    private var windowThumbnailPayload: String?
+    private var windowThumbnail: NSImage?
     private var phase: CGFloat = 0
 
     override init(frame frameRect: NSRect) {
@@ -30,6 +32,7 @@ final class GesturePreviewView: NSView {
     func show(trigger: GestureTrigger, action: EdgeActionSetting) {
         self.trigger = trigger
         self.action = action
+        refreshWindowThumbnailIfNeeded(for: action)
         phase = 0
         needsDisplay = true
     }
@@ -162,6 +165,8 @@ final class GesturePreviewView: NSView {
             drawSwitchAppPreview(in: rect, progress: progress)
         case .switchApplication:
             drawSwitchAppPreview(in: rect, progress: progress)
+        case .switchWindow:
+            drawSwitchWindowPreview(in: rect, progress: progress)
         case .missionControl, .appExpose, .showDesktop, .launchpad, .notificationCenter, .startScreenSaver:
             drawDisabledPreview(in: rect, progress: progress)
         }
@@ -377,6 +382,65 @@ final class GesturePreviewView: NSView {
         let highlight = NSBezierPath(roundedRect: selected, xRadius: 13, yRadius: 13)
         highlight.lineWidth = 3
         highlight.stroke()
+    }
+
+    private func drawSwitchWindowPreview(in rect: NSRect, progress: CGFloat) {
+        drawDesktopBackdrop(in: rect, progress: 0)
+        NSColor.black.withAlphaComponent(0.22 + 0.14 * progress).setFill()
+        NSBezierPath(roundedRect: rect, xRadius: 6, yRadius: 6).fill()
+
+        let previewRect = rect.insetBy(dx: 30, dy: 26)
+        let shadowRect = previewRect.offsetBy(dx: 0, dy: -5 + 5 * progress)
+        NSColor.black.withAlphaComponent(0.26).setFill()
+        NSBezierPath(roundedRect: shadowRect.insetBy(dx: -4, dy: -4), xRadius: 11, yRadius: 11).fill()
+
+        let thumbnailRect = previewRect.offsetBy(dx: 0, dy: 10 * progress)
+        if let thumbnail = windowThumbnail {
+            drawImage(thumbnail, aspectFitIn: thumbnailRect, cornerRadius: 8)
+        } else {
+            drawDemoWindow(thumbnailRect, alpha: 0.94)
+            drawMissingWindowLabel(in: thumbnailRect)
+        }
+
+        NSColor.white.withAlphaComponent(0.72).setStroke()
+        let outline = NSBezierPath(roundedRect: thumbnailRect, xRadius: 8, yRadius: 8)
+        outline.lineWidth = 3
+        outline.stroke()
+    }
+
+    private func drawImage(_ image: NSImage, aspectFitIn rect: NSRect, cornerRadius: CGFloat) {
+        let imageSize = image.size
+        guard imageSize.width > 0, imageSize.height > 0 else {
+            return
+        }
+
+        let scale = min(rect.width / imageSize.width, rect.height / imageSize.height)
+        let drawSize = NSSize(width: imageSize.width * scale, height: imageSize.height * scale)
+        let drawRect = NSRect(
+            x: rect.midX - drawSize.width / 2,
+            y: rect.midY - drawSize.height / 2,
+            width: drawSize.width,
+            height: drawSize.height
+        )
+
+        NSGraphicsContext.saveGraphicsState()
+        let clip = NSBezierPath(roundedRect: drawRect, xRadius: cornerRadius, yRadius: cornerRadius)
+        clip.addClip()
+        image.draw(in: drawRect, from: .zero, operation: .sourceOver, fraction: 1)
+        NSGraphicsContext.restoreGraphicsState()
+    }
+
+    private func drawMissingWindowLabel(in rect: NSRect) {
+        let text = "Window Preview"
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 13, weight: .semibold),
+            .foregroundColor: NSColor.secondaryLabelColor
+        ]
+        let size = text.size(withAttributes: attributes)
+        text.draw(
+            at: CGPoint(x: rect.midX - size.width / 2, y: rect.minY + 18),
+            withAttributes: attributes
+        )
     }
 
     private func drawHUDGlyph(in rect: NSRect, progress: CGFloat) {
@@ -637,6 +701,44 @@ final class GesturePreviewView: NSView {
         }?.icon
     }
 
+    private func refreshWindowThumbnailIfNeeded(for action: EdgeActionSetting) {
+        guard action.kind == .switchWindow else {
+            windowThumbnailPayload = nil
+            windowThumbnail = nil
+            return
+        }
+
+        guard windowThumbnailPayload != action.payload else {
+            return
+        }
+
+        windowThumbnailPayload = action.payload
+        windowThumbnail = captureWindowThumbnail(from: action.payload)
+    }
+
+    private func captureWindowThumbnail(from payload: String) -> NSImage? {
+        guard let target = WindowActionTarget.parse(payload) else {
+            return nil
+        }
+
+        let windowID = CGWindowID(target.windowID)
+        guard let image = CGWindowListCreateImage(
+            .null,
+            .optionIncludingWindow,
+            windowID,
+            [.boundsIgnoreFraming, .bestResolution]
+        ) else {
+            return nil
+        }
+
+        let size = NSSize(width: image.width, height: image.height)
+        guard size.width > 1, size.height > 1 else {
+            return nil
+        }
+
+        return NSImage(cgImage: image, size: size)
+    }
+
     private var actionBackgroundColor: NSColor {
         switch action.kind {
         case .disabled:
@@ -659,6 +761,8 @@ final class GesturePreviewView: NSView {
             return .systemMint
         case .switchApplication:
             return .systemPurple
+        case .switchWindow:
+            return .systemPink
         case .missionControl, .appExpose, .showDesktop, .launchpad, .notificationCenter, .startScreenSaver:
             return .systemGray
         }

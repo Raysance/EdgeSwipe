@@ -3,6 +3,9 @@ import ApplicationServices
 import Foundation
 import EdgeSwipeCore
 
+@_silgen_name("_AXUIElementGetWindow")
+private func _AXUIElementGetWindow(_ element: AXUIElement, _ identifier: UnsafeMutablePointer<CGWindowID>) -> AXError
+
 @MainActor
 final class ActionRunner {
     private var hudWindow: NSWindow?
@@ -30,6 +33,8 @@ final class ActionRunner {
             restoreHiddenWindow(trigger: trigger)
         case .switchApplication:
             switchApplication(action.payload, trigger: trigger)
+        case .switchWindow:
+            switchWindow(action.payload, trigger: trigger)
         case .missionControl, .appExpose, .showDesktop, .launchpad, .notificationCenter, .startScreenSaver:
             showHUD(trigger: trigger, text: "Action removed")
         }
@@ -245,6 +250,44 @@ final class ActionRunner {
         showHUD(trigger: trigger, text: runningApp.localizedName ?? "Switch App")
     }
 
+    private func switchWindow(_ payload: String, trigger: GestureTrigger) {
+        guard AXIsProcessTrusted() else {
+            noteMissingAccessibility(trigger: trigger)
+            return
+        }
+
+        guard let target = WindowActionTarget.parse(payload) else {
+            showHUD(trigger: trigger, text: "No window target")
+            return
+        }
+
+        guard let runningApp = runningApplication(for: target) else {
+            showHUD(trigger: trigger, text: "App not running")
+            return
+        }
+
+        let axApp = AXUIElementCreateApplication(runningApp.processIdentifier)
+        AXUIElementSetAttributeValue(axApp, kAXHiddenAttribute as CFString, kCFBooleanFalse)
+        runningApp.unhide()
+        runningApp.activate(options: [.activateAllWindows, .activateIgnoringOtherApps])
+
+        guard let window = matchingWindow(in: axApp, target: target) else {
+            showHUD(trigger: trigger, text: "Window not found")
+            return
+        }
+
+        restoreMinimizedWindow(window)
+        AXUIElementPerformAction(window, kAXRaiseAction as CFString)
+        AXUIElementSetAttributeValue(axApp, kAXFocusedWindowAttribute as CFString, window)
+        showHUD(trigger: trigger, text: target.title.isEmpty ? target.appName : target.title)
+    }
+
+    private func runningApplication(for target: WindowActionTarget) -> NSRunningApplication? {
+        NSWorkspace.shared.runningApplications.first { app in
+            app.bundleIdentifier == target.bundleIdentifier
+        } ?? NSRunningApplication(processIdentifier: pid_t(target.processIdentifier))
+    }
+
     private func hideFrontWindow(trigger: GestureTrigger) {
         guard AXIsProcessTrusted() else {
             noteMissingAccessibility(trigger: trigger)
@@ -387,6 +430,36 @@ final class ActionRunner {
         }
     }
 
+    private func matchingWindow(in axApp: AXUIElement, target: WindowActionTarget) -> AXUIElement? {
+        var windowsValue: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(axApp, kAXWindowsAttribute as CFString, &windowsValue) == .success,
+              let windows = windowsValue as? [AXUIElement]
+        else {
+            return nil
+        }
+
+        if let window = windows.first(where: { axWindowID($0) == target.windowID }) {
+            return window
+        }
+
+        if !target.title.isEmpty,
+           let window = windows.first(where: { axStringAttribute(kAXTitleAttribute, from: $0) == target.title })
+        {
+            return window
+        }
+
+        return windows.first
+    }
+
+    private func axWindowID(_ window: AXUIElement) -> UInt32? {
+        var id = CGWindowID(0)
+        guard _AXUIElementGetWindow(window, &id) == .success else {
+            return nil
+        }
+
+        return id
+    }
+
     private func axStringAttribute(_ attribute: String, from element: AXUIElement) -> String? {
         var value: CFTypeRef?
         guard AXUIElementCopyAttributeValue(element, attribute as CFString, &value) == .success else {
@@ -451,6 +524,19 @@ final class ActionRunner {
         }
 
         return restored
+    }
+
+    @discardableResult
+    private func restoreMinimizedWindow(_ window: AXUIElement) -> Bool {
+        var minimizedValue: CFTypeRef?
+        let isMinimized = AXUIElementCopyAttributeValue(window, kAXMinimizedAttribute as CFString, &minimizedValue) == .success &&
+            (minimizedValue as? Bool == true)
+
+        guard isMinimized else {
+            return false
+        }
+
+        return AXUIElementSetAttributeValue(window, kAXMinimizedAttribute as CFString, kCFBooleanFalse) == .success
     }
 
     private func noteMissingAccessibility(trigger: GestureTrigger) {

@@ -148,7 +148,7 @@ final class SettingsWindowController: NSWindowController {
         accessibilityRow.spacing = 12
         accessibilityRow.translatesAutoresizingMaskIntoConstraints = false
 
-        accessibilityButton = NSButton(title: "Grant Accessibility...", target: self, action: #selector(requestAccessibilityAccess))
+        accessibilityButton = NSButton(title: "Grant Permissions...", target: self, action: #selector(requestRequiredPermissions))
         accessibilityButton.bezelStyle = .rounded
 
         accessibilityStatusLabel = NSTextField(labelWithString: accessibilityStatusText)
@@ -231,18 +231,34 @@ final class SettingsWindowController: NSWindowController {
         launchAtLoginStatusLabel.stringValue = LoginItemController.statusText
     }
 
-    @objc private func requestAccessibilityAccess() {
+    @objc private func requestRequiredPermissions() {
         let options = ["AXTrustedCheckOptionPrompt": true] as CFDictionary
         _ = AXIsProcessTrustedWithOptions(options)
+        _ = CGRequestScreenCaptureAccess()
         openAccessibilityPrivacySettings()
-        refreshAccessibilityStatusSoon()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) { [weak self] in
+            self?.openScreenRecordingPrivacySettings()
+        }
+        refreshPermissionStatusSoon()
     }
 
     private var accessibilityStatusText: String {
-        AXIsProcessTrusted() ? "Accessibility access is granted." : "Required for Control Center, hiding windows, and restoring windows."
+        let accessibilityGranted = AXIsProcessTrusted()
+        let screenRecordingGranted = CGPreflightScreenCaptureAccess()
+
+        switch (accessibilityGranted, screenRecordingGranted) {
+        case (true, true):
+            return "Accessibility and Screen Recording are granted."
+        case (false, true):
+            return "Accessibility required for Control Center, hiding, restoring, and switching windows."
+        case (true, false):
+            return "Screen Recording required for Switch Window thumbnails."
+        case (false, false):
+            return "Accessibility and Screen Recording permissions are required."
+        }
     }
 
-    private func refreshAccessibilityStatusSoon() {
+    private func refreshPermissionStatusSoon() {
         accessibilityStatusLabel.stringValue = accessibilityStatusText
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
             self?.accessibilityStatusLabel.stringValue = self?.accessibilityStatusText ?? ""
@@ -259,6 +275,17 @@ final class SettingsWindowController: NSWindowController {
         }
 
         if let url = URL(string: "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_Accessibility") {
+            NSWorkspace.shared.open(url)
+        }
+    }
+
+    private func openScreenRecordingPrivacySettings() {
+        let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")
+        if let url, NSWorkspace.shared.open(url) {
+            return
+        }
+
+        if let url = URL(string: "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_ScreenCapture") {
             NSWorkspace.shared.open(url)
         }
     }
@@ -664,6 +691,17 @@ final class EdgeActionRow: NSStackView {
         applySelection()
     }
 
+    @objc private func selectSwitchWindow(_ sender: NSMenuItem) {
+        guard let window = sender.representedObject as? WindowedWindow else {
+            return
+        }
+
+        selectedKind = .switchWindow
+        payload.stringValue = window.target.payload
+        rebuildActionMenu()
+        applySelection()
+    }
+
     @objc private func payloadChanged() {
         applySelection()
     }
@@ -697,6 +735,7 @@ final class EdgeActionRow: NSStackView {
         case .hideFrontWindow: return "Hides the front window on the active display"
         case .restoreHiddenWindow: return "Restores the last window hidden by EdgeSwipe"
         case .switchApplication: return "Safari or com.apple.Safari"
+        case .switchWindow: return "Choose a window from the action menu"
         case .missionControl, .appExpose, .showDesktop, .launchpad, .notificationCenter, .startScreenSaver:
             return "Removed action"
         }
@@ -705,7 +744,7 @@ final class EdgeActionRow: NSStackView {
     private func rebuildActionMenu() {
         let menu = NSMenu()
 
-        for kind in GestureActionKind.allCases where kind != .switchApplication {
+        for kind in GestureActionKind.allCases where kind != .switchApplication && kind != .switchWindow {
             let item = NSMenuItem(title: kind.displayName, action: #selector(selectRegularAction(_:)), keyEquivalent: "")
             item.target = self
             item.representedObject = kind.rawValue
@@ -714,6 +753,25 @@ final class EdgeActionRow: NSStackView {
         }
 
         menu.addItem(.separator())
+
+        let windows = WindowedWindow.current()
+        let windowItem = NSMenuItem(title: "Switch Window", action: nil, keyEquivalent: "")
+        let windowMenu = NSMenu()
+        if windows.isEmpty {
+            let emptyItem = NSMenuItem(title: "No visible windows", action: nil, keyEquivalent: "")
+            emptyItem.isEnabled = false
+            windowMenu.addItem(emptyItem)
+        } else {
+            for window in windows {
+                let windowMenuItem = NSMenuItem(title: window.menuTitle, action: #selector(selectSwitchWindow(_:)), keyEquivalent: "")
+                windowMenuItem.target = self
+                windowMenuItem.representedObject = window
+                windowMenuItem.state = selectedKind == .switchWindow && payload.stringValue == window.target.payload ? .on : .off
+                windowMenu.addItem(windowMenuItem)
+            }
+        }
+        windowItem.submenu = windowMenu
+        menu.addItem(windowItem)
 
         let switchItem = NSMenuItem(title: "Switch App", action: nil, keyEquivalent: "")
         let switchMenu = NSMenu()
@@ -737,10 +795,22 @@ final class EdgeActionRow: NSStackView {
         menu.addItem(switchItem)
 
         popup.menu = menu
-        popup.title = selectedPopupTitle(from: apps)
+        popup.title = selectedPopupTitle(from: apps, windows: windows)
     }
 
-    private func selectedPopupTitle(from apps: [WindowedApplication]) -> String {
+    private func selectedPopupTitle(from apps: [WindowedApplication], windows: [WindowedWindow]) -> String {
+        if selectedKind == .switchWindow {
+            if let selectedWindow = windows.first(where: { $0.target.payload == payload.stringValue }) {
+                return "Switch Window: \(selectedWindow.shortTitle)"
+            }
+
+            if let target = WindowActionTarget.parse(payload.stringValue) {
+                return "Switch Window: \(target.title)"
+            }
+
+            return selectedKind.displayName
+        }
+
         guard selectedKind == .switchApplication else {
             return selectedKind.displayName
         }
@@ -756,6 +826,64 @@ private final class ActionPopUpButton: NSPopUpButton {
     override func mouseDown(with event: NSEvent) {
         onOpen?()
         super.mouseDown(with: event)
+    }
+}
+
+private struct WindowedWindow: Sendable {
+    let target: WindowActionTarget
+
+    var shortTitle: String {
+        target.title.isEmpty ? target.appName : target.title
+    }
+
+    var menuTitle: String {
+        let title = target.title.isEmpty ? "Untitled Window" : target.title
+        return "\(target.appName): \(title)"
+    }
+
+    @MainActor
+    static func current() -> [WindowedWindow] {
+        guard let windowInfo = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] else {
+            return []
+        }
+
+        let runningApps = Dictionary(
+            uniqueKeysWithValues: NSWorkspace.shared.runningApplications.compactMap { app -> (pid_t, NSRunningApplication)? in
+                guard app.activationPolicy == .regular else {
+                    return nil
+                }
+
+                return (app.processIdentifier, app)
+            }
+        )
+        let ownProcessIdentifier = NSRunningApplication.current.processIdentifier
+
+        return windowInfo.compactMap { info -> WindowedWindow? in
+            guard let layer = info[kCGWindowLayer as String] as? Int,
+                  layer == 0,
+                  let processIdentifier = info[kCGWindowOwnerPID as String] as? pid_t,
+                  processIdentifier != ownProcessIdentifier,
+                  let app = runningApps[processIdentifier],
+                  let bundleIdentifier = app.bundleIdentifier,
+                  let windowIDNumber = info[kCGWindowNumber as String] as? NSNumber
+            else {
+                return nil
+            }
+
+            let appName = app.localizedName ?? info[kCGWindowOwnerName as String] as? String ?? bundleIdentifier
+            let title = info[kCGWindowName as String] as? String ?? ""
+            let target = WindowActionTarget(
+                bundleIdentifier: bundleIdentifier,
+                appName: appName,
+                title: title,
+                windowID: windowIDNumber.uint32Value,
+                processIdentifier: Int32(processIdentifier)
+            )
+            return WindowedWindow(target: target)
+        }
+        .sorted { lhs, rhs in
+            lhs.menuTitle.localizedCaseInsensitiveCompare(rhs.menuTitle) == .orderedAscending
+        }
     }
 }
 
